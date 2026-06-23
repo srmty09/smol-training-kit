@@ -4,11 +4,7 @@ from typing import Optional, List
 import tomllib
 
 import torch  # type: ignore
-
-try:
-    import yaml
-except ImportError:
-    yaml = None
+import yaml
 
 
 @dataclass
@@ -17,6 +13,7 @@ class TrainingConfig:
     model_name: str = "lilLM"
     tokenizer_name: str = "LilTok"
     dataset_name: str = "TinyStories"
+
     max_steps: int = 10000
     batch_size: int = 8
     grad_accumulation_steps: int = 4
@@ -24,38 +21,50 @@ class TrainingConfig:
     weight_decay: float = 0.01
     warmup_ratio: float = 0.03
     max_grad_norm: float = 1.0
-  
+
     seed: int = 20040905
     dropout: float = 0.1
-  
+
     logging_steps: int = 10
     save_steps: int = 200
     save_dir: str = "checkpoints"
+
     use_wandb: bool = True
     wandb_login: str = ""
     wandb_project_name: str = ""
-  
+
     use_lora: bool = False
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     lora_target_modules: Optional[List[str]] = None
-  
+
     bf16: bool = False
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
+    hf_login: str = ""
+    hf_model_dir: str = ""
+    push_to_hf: bool = False
+    hf_private_repo: bool = False
+
     @classmethod
     def from_file(cls, file_path: str):
-        file_path = Path(file_path) 
+        file_path = Path(file_path)
+
         if not file_path.exists():
             raise FileNotFoundError(f"Config file not found: {file_path}")
 
         if file_path.suffix == ".toml":
             with open(file_path, "rb") as f:
                 data = tomllib.load(f)
+
         elif file_path.suffix in [".yaml", ".yml"]:
             with open(file_path, "r") as f:
                 data = yaml.safe_load(f)
+
+            if data is None:
+                data = {}
+
         else:
             raise ValueError("Only .toml, .yaml, and .yml files are supported")
 

@@ -4,6 +4,8 @@ import time
 
 import torch  # type: ignore
 import wandb
+from huggingface_hub import HfApi, login
+from peft import LoraConfig, get_peft_model  # type: ignore
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -71,6 +73,9 @@ class Trainer:
                 config=training_cfg.__dict__,
             )
 
+        if self.train_cfg.push_to_hf and self.train_cfg.hf_login:
+            self._hf_login()
+
     @staticmethod
     def _set_seed(seed: int):
         random.seed(seed)
@@ -80,11 +85,6 @@ class Trainer:
             torch.cuda.manual_seed_all(seed)
 
     def _apply_lora(self):
-        try:
-            from peft import LoraConfig, get_peft_model  # type: ignore
-        except ImportError as e:
-            raise ImportError("LoRA needs peft. Install it using: pip install peft") from e
-
         lora_cfg = LoraConfig(
             r=self.train_cfg.lora_r,
             lora_alpha=self.train_cfg.lora_alpha,
@@ -95,6 +95,41 @@ class Trainer:
 
         self.model = get_peft_model(self.model, lora_cfg)
         self.model.print_trainable_parameters()
+
+    def _hf_login(self):
+        login(token=self.train_cfg.hf_login)
+
+    def _push_checkpoint_to_hf(self, checkpoint_path: str, checkpoint_name: str):
+        if not self.train_cfg.push_to_hf:
+            return
+
+        if not self.train_cfg.hf_login:
+            return
+
+        if not self.train_cfg.hf_model_dir:
+            raise ValueError(
+                "hf_model_dir is empty. Set it like: hf_model_dir='username/repo-name'"
+            )
+
+        api = HfApi(token=self.train_cfg.hf_login)
+
+        api.create_repo(
+            repo_id=self.train_cfg.hf_model_dir,
+            private=self.train_cfg.hf_private_repo,
+            exist_ok=True,
+        )
+
+        api.upload_folder(
+            repo_id=self.train_cfg.hf_model_dir,
+            folder_path=checkpoint_path,
+            path_in_repo=checkpoint_name,
+            commit_message=f"upload {checkpoint_name}",
+        )
+
+        print(
+            f"pushed checkpoint to HF -> "
+            f"{self.train_cfg.hf_model_dir}/{checkpoint_name}"
+        )
 
     def _get_grad_norm(self):
         total_norm_sq = 0.0
@@ -308,6 +343,11 @@ class Trainer:
         )
 
         print(f"saved checkpoint {save_path}")
+
+        self._push_checkpoint_to_hf(
+            checkpoint_path=save_path,
+            checkpoint_name=name,
+        )
 
     def load_checkpoint(self, path: str):
         loaded_model = AutoModelForCausalLM.from_pretrained(
