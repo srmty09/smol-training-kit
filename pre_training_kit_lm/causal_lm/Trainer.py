@@ -75,6 +75,7 @@ class Trainer:
 
         if self.train_cfg.push_to_hf and self.train_cfg.hf_login:
             self._hf_login()
+            self._test_hf_upload()
 
     @staticmethod
     def _set_seed(seed: int):
@@ -99,13 +100,7 @@ class Trainer:
     def _hf_login(self):
         login(token=self.train_cfg.hf_login)
 
-    def _push_checkpoint_to_hf(self, checkpoint_path: str, checkpoint_name: str):
-        if not self.train_cfg.push_to_hf:
-            return
-
-        if not self.train_cfg.hf_login:
-            return
-
+    def _get_hf_api(self):
         if not self.train_cfg.hf_model_dir:
             raise ValueError(
                 "hf_model_dir is empty. Set it like: hf_model_dir='username/repo-name'"
@@ -119,6 +114,45 @@ class Trainer:
             exist_ok=True,
         )
 
+        return api
+
+    def _test_hf_upload(self):
+        test_dir = os.path.join(self.train_cfg.save_dir, "hf_upload_test")
+        os.makedirs(test_dir, exist_ok=True)
+
+        test_file_path = os.path.join(test_dir, "dummy_hf_upload_test.txt")
+
+        with open(test_file_path, "w") as f:
+            f.write(
+                "Hi, it is srmty ':)'.\n"
+                f"model_dir: {self.train_cfg.hf_model_dir}\n"
+                f"seed: {self.train_cfg.seed}\n"
+                f"time: {time.ctime()}\n"
+            )
+
+        api = self._get_hf_api()
+
+        api.upload_file(
+            repo_id=self.train_cfg.hf_model_dir,
+            path_or_fileobj=test_file_path,
+            path_in_repo="dummy_hf_upload_test.txt",
+            commit_message="test upload",
+        )
+
+        print(
+            f"uploaded ':)' "
+            f"{self.train_cfg.hf_model_dir}/dummy_hf_upload_test.txt"
+        )
+
+    def _push_checkpoint_to_hf(self, checkpoint_path: str, checkpoint_name: str):
+        if not self.train_cfg.push_to_hf:
+            return
+
+        if not self.train_cfg.hf_login:
+            return
+
+        api = self._get_hf_api()
+
         api.upload_folder(
             repo_id=self.train_cfg.hf_model_dir,
             folder_path=checkpoint_path,
@@ -127,7 +161,7 @@ class Trainer:
         )
 
         print(
-            f"pushed checkpoint to HF -> "
+            f"pushed checkpoint to HF."
             f"{self.train_cfg.hf_model_dir}/{checkpoint_name}"
         )
 
@@ -382,6 +416,6 @@ class Trainer:
             self.global_step = state.get("global_step", 0)
 
         print(
-            f"resumed from checkpoint -> {path} "
+            f"resumed from checkpoint: {path} "
             f"(global_step={self.global_step})"
         )
