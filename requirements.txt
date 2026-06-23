@@ -1,0 +1,9 @@
+torch
+transformers
+datasets
+tokenizers
+tqdm
+wandb
+huggingface_hub
+peft
+pyyaml
