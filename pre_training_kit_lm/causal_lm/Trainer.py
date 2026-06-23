@@ -96,7 +96,19 @@ class Trainer:
         self.model = get_peft_model(self.model, lora_cfg)
         self.model.print_trainable_parameters()
 
+    def _get_grad_norm(self):
+        total_norm_sq = 0.0
+
+        for param in self.model.parameters():
+            if param.grad is not None:
+                param_norm = param.grad.detach().data.norm(2)
+                total_norm_sq += param_norm.item() ** 2
+
+        return total_norm_sq ** 0.5
+
     def _optimizer_step(self, accum_tokens: int, accum_start_time: float):
+        grad_norm = self._get_grad_norm()
+
         if self.train_cfg.max_grad_norm is not None and self.train_cfg.max_grad_norm > 0:
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(),
@@ -113,9 +125,16 @@ class Trainer:
         tokens_per_second = accum_tokens / elapsed if elapsed > 0 else 0.0
         current_lr = self.optimizer.param_groups[0]["lr"]
 
-        return current_lr, tokens_per_second
+        return current_lr, tokens_per_second, grad_norm
 
-    def _log_and_save(self, current_loss, perplexity, current_lr, tokens_per_second):
+    def _log_and_save(
+        self,
+        current_loss,
+        perplexity,
+        current_lr,
+        tokens_per_second,
+        grad_norm,
+    ):
         if (
             self.train_cfg.use_wandb
             and self.train_cfg.logging_steps > 0
@@ -127,6 +146,7 @@ class Trainer:
                     "train/perplexity": perplexity,
                     "train/lr": current_lr,
                     "train/tokens_per_second": tokens_per_second,
+                    "train/grad_norm": grad_norm,
                 },
                 step=self.global_step,
             )
@@ -143,6 +163,7 @@ class Trainer:
 
         current_lr = self.optimizer.param_groups[0]["lr"]
         tokens_per_second = 0.0
+        grad_norm = 0.0
 
         current_loss = 0.0
         perplexity = 0.0
@@ -180,7 +201,7 @@ class Trainer:
                 should_step = (batch_idx + 1) % self.train_cfg.grad_accumulation_steps == 0
 
                 if should_step:
-                    current_lr, tokens_per_second = self._optimizer_step(
+                    current_lr, tokens_per_second, grad_norm = self._optimizer_step(
                         accum_tokens,
                         accum_start_time,
                     )
@@ -190,6 +211,7 @@ class Trainer:
                         perplexity,
                         current_lr,
                         tokens_per_second,
+                        grad_norm,
                     )
 
                     accum_tokens = 0
@@ -201,6 +223,7 @@ class Trainer:
                         loss=f"{current_loss:.4f}",
                         perplexity=f"{perplexity:.2f}",
                         lr=f"{current_lr:.2e}",
+                        grad_norm=f"{grad_norm:.4f}",
                         tok_s=f"{tokens_per_second:.0f}",
                     )
 
